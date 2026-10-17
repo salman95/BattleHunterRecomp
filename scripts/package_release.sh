@@ -9,6 +9,10 @@
 # Usage:
 #   scripts/package_release.sh <build-dir> <artifact-tag> [recompiler-build-dir]
 #
+# <artifact-tag> is "linux-x64" or "windows-x64" (anything windows-* gets the
+# .exe suffix and the packager's whole Windows path). STAGE_ONLY=1 stages
+# without compressing, which is what scripts/package_appimage.sh wraps.
+#
 # Writes: dist/bh-<VERSION>-<artifact-tag>.zip
 # (or, with STAGE_ONLY=1, just the validated dist/stage-game-<artifact> payload
 # that scripts/package_appimage.sh wraps — no ZIP compression.)
@@ -32,6 +36,16 @@ fi
 chmod +x "${PACKAGER}" 2>/dev/null || true
 
 EXTRA=()
+# Windows artifacts carry the .exe suffix. tools/package_game_release.sh keys
+# its whole Windows path off that suffix -- MinGW DLL bundling, Authenticode
+# signing, the execution-contract binding after signing, and the sibling-DLL
+# copy -- so a windows-* artifact staged under the extensionless Linux name
+# would ship an unsigned, unbound PE with no DLL pass at all.
+EXE_NAME="BattleHunter_Recompiled"
+case "${ARTIFACT_TAG}" in
+  windows-*) EXE_NAME="BattleHunter_Recompiled.exe" ;;
+esac
+
 # Overlay shard cache. It is compiled FROM THE DISC, so CI (no disc) cannot
 # build one: the bundled overlay_toolchain/ compiles everything from the
 # player's disc at runtime. A developer packaging locally with a cache can
@@ -59,7 +73,7 @@ exec bash "${PACKAGER}" \
   --build-dir "${BUILD_DIR}" \
   --artifact "${ARTIFACT_TAG}" \
   --zip-prefix bh \
-  --exe-name BattleHunter_Recompiled \
+  --exe-name "${EXE_NAME}" \
   --display-name "Battle Hunter Recompiled" \
   --recompiler-build "${RECOMPILER_BUILD}" \
   --version-env RELEASE_VERSION \

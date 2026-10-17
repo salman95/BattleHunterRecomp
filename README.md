@@ -17,10 +17,12 @@ music tracks playing at the right moments, on a real 8BitDo controller.
 | Players | 2 |
 | Region | USA (SLUS-01335) |
 | Original | *Battle Hunter*, PlayStation, c. 2000 |
+| Platforms | Linux x86-64 (AppImage or zip) · Windows x86-64 (zip) |
 
 📖 **[docs/Battle-Hunter-Recomp-Explained.pdf](docs/Battle-Hunter-Recomp-Explained.pdf)** — a
 plain-English explanation of the whole project (how the disc layout was reconstructed, how the
-translation works, how it was tested).
+translation works, how it was tested). **[docs/WINDOWS.md](docs/WINDOWS.md)** — how the Windows exe is
+built, why it needs no DLLs, and how it gets tested here with Proton.
 
 ## Quick start
 
@@ -28,9 +30,13 @@ translation works, how it was tested).
 **[Releases](../../releases)** page, then:
 
 ```sh
+# Linux
 chmod +x BattleHunter-Recompiled-v*-x86_64.AppImage
 ./BattleHunter-Recompiled-v0.1.0-x86_64.AppImage   # opens the launcher
 ```
+
+On **Windows**, extract `bh-<version>-windows-x64.zip` and run `BattleHunter_Recompiled.exe` — one
+file, no installer, no DLLs to install beside it ([how that is guaranteed](docs/WINDOWS.md)).
 
 Two clicks and one file pick:
 
@@ -81,13 +87,18 @@ Developers regenerate that committed C from their own disc on a git checkout —
 
 ## Requirements
 
-- **To play:** an x86-64 Linux desktop (built on Ubuntu 24.04, so glibc ≥ 2.39: Ubuntu 24.04+,
-  Debian 13+, Fedora 40+, Arch/CachyOS, Mint 22.x) with OpenGL. Nothing else — the AppImage
-  carries its own SDL3.
+- **To play:**
+  - **Linux** — an x86-64 desktop (built on Ubuntu 24.04, so glibc ≥ 2.39: Ubuntu 24.04+, Debian 13+,
+    Fedora 40+, Arch/CachyOS, Mint 22.x) with OpenGL. Nothing else — the AppImage carries its own SDL3.
+  - **Windows** — 10 or 11, x86-64, with OpenGL (every GPU driver Windows ships has it). The exe is
+    statically linked and imports only system DLLs, so there is no runtime to install and no DLL to
+    get wrong. Unsigned for now: SmartScreen will warn, and Smart App Control (new Windows 11
+    installs) blocks unsigned binaries — see [docs/WINDOWS.md](docs/WINDOWS.md#code-signing).
 - **Your own copy of Battle Hunter (USA)** — a `.cue`/`.bin` dump of your disc. The runtime checks
   it matches the supported revision (SLUS-01335) and tells you clearly if it differs.
 - **To develop:** git, Python ≥ 3.11, CMake ≥ 3.20, Ninja, and a C/C++ compiler (CMake fetches SDL3
-  itself; network once).
+  itself; network once). To build the Windows exe, a MinGW-w64 cross toolchain —
+  [docs/WINDOWS.md](docs/WINDOWS.md#building-the-windows-exe-on-this-linux-machine).
 
 ---
 
@@ -110,6 +121,11 @@ The [Releases](../../releases) page carries two artifacts with the same validate
 
 - **`bh-<version>-linux-x64.zip`** — the same payload as a plain zip: extract, run
   `./BattleHunter_Recompiled`, and everything (settings, cards) is written next to the executable.
+
+- **`bh-<version>-windows-x64.zip`** — the Windows build: extract anywhere, run
+  `BattleHunter_Recompiled.exe`. Settings and memory cards are written next to the exe. It is a MinGW
+  build with the CRT and SDL3 linked in, so it imports nothing but Windows system DLLs — no
+  `0xc000007b`, no "install this runtime", no DLLs beside it.
 
 Either way, first run asks for your disc image — pick your `BattleHunter.cue` (a `.bin` dump works
 the same), the launcher verifies the revision, remembers the path, and you press **PLAY**.
@@ -190,16 +206,27 @@ Things worth knowing:
 
 #### Releasing
 
-CI builds and ships the compiled game ([release workflow](.github/workflows/release.yml)):
-the gates (`check_boot_exe` / `check_generated` / `check_bios_stamps`), a Release build from the
+CI builds and ships the compiled game ([release workflow](.github/workflows/release.yml)) for **two
+platforms** — the same matrix every psxrecomp title uses (`ubuntu-24.04` → linux-x64,
+`windows-2022` inside an MSYS2 MinGW-w64 shell → windows-x64). Each job runs
+the gates (`check_boot_exe` / `check_generated` / `check_bios_stamps`), builds Release from the
 committed C, then
 
 - `scripts/package_release.sh build-ci linux-x64 build-recompiler` → `dist/bh-<version>-linux-x64.zip`
+- `scripts/package_release.sh build-ci windows-x64 build-recompiler` → `dist/bh-<version>-windows-x64.zip`
 - `scripts/package_appimage.sh build-ci build-recompiler` →
-  `dist/BattleHunter-Recompiled-v<version>-x86_64.AppImage`
+  `dist/BattleHunter-Recompiled-v<version>-x86_64.AppImage` (Linux only: it wraps the Linux payload)
 
 both driving the framework packagers with this title's rendered inputs (`scripts/appimage/`).
-Push a tag (`git tag v0.1.1 && git push origin v0.1.1`) or dispatch the workflow to publish.
+The Windows job adds two assertions of its own: the zip must carry `overlay_toolchain/tcc/tcc.exe` +
+embedded Python (the player's overlay fallback), and `scripts/check_windows_pe.sh` must find *only*
+Windows system DLL imports in the shipped exe. Push a tag (`git tag v0.1.1 && git push origin v0.1.1`)
+or dispatch the workflow to publish.
+
+The Windows build does not need a Windows machine to iterate on —
+[`docs/WINDOWS.md`](docs/WINDOWS.md#building-the-windows-exe-on-this-linux-machine) covers the Linux
+cross build (`scripts/build_windows.sh`) and running the result under Proton
+(`scripts/test_windows_proton.sh`).
 
 <details>
 <summary>Self-test (full pipeline + 25s headless boot):</summary>
@@ -249,7 +276,8 @@ Some scenes stream extra code modules off the disc into memory and run them. Two
 - **In every release:** a tiny built-in interpreter runs those fragments **correctly** (the framework's
   safety net), and the bundled `overlay_toolchain/` autocompiles anything you encounter into native
   plug-ins, keyed by the exact bytes it read from **your** disc — the runtime logs
-  `overlay autocompile enabled (gcc)`. Nothing to set up.
+  `overlay autocompile enabled (gcc)` on Linux and `(tcc)` on Windows (the zip carries TinyCC and an
+  embedded Python, so there is nothing to install). Nothing to set up.
 - **Developers** can pre-compile everything they've already played into a cache (see
   `PSX_OVERLAY_CACHE_ROOT` in `scripts/package_release.sh`):
 
@@ -278,7 +306,13 @@ means "first connected pad", or pin a specific one by GUID.
 ## Troubleshooting
 
 - **Where did my saves go?** — the AppImage keeps settings, memory cards and captures in
-  `~/.local/share/BattleHunterRecomp`; the zip keeps them next to the executable.
+  `~/.local/share/BattleHunterRecomp`; the zip keeps them next to the executable (on Windows, next to
+  `BattleHunter_Recompiled.exe`).
+- **Windows: SmartScreen / "Windows protected your PC"** — the build is unsigned today; the signing
+  hooks are already in CI and need a certificate in the repo's secrets
+  ([docs/WINDOWS.md](docs/WINDOWS.md#code-signing)).
+- **Windows: `0xc000007b` on launch** — a stray `lib*.dll` / `SDL*.dll` beside the exe or earlier on
+  `PATH`. `scripts/check_windows_pe.sh <exe>` proves which imports the binary really has.
 - **"known disc digests do not match"** — your dump is a different revision/region. This project
   targets the USA release (SLUS-01335). Check the data track size: 86,003,232 bytes.
 - **No audio** — check your system's pipewire/pulse setup; the runtime outputs via SDL3.
@@ -298,16 +332,21 @@ seeds/               function addresses used as translation discovery hints
 codegen_setup.c/.h   title-side codegen hooks
 CMakeLists.txt       thin build glue (adds the runtime target)
 scripts/
-  package_release.sh    zip packager (drives psxrecomp/tools/package_game_release.sh)
+  package_release.sh    zip packager for either platform (drives psxrecomp/tools/package_game_release.sh)
   package_appimage.sh   AppImage packager (drives psxrecomp/tools/package_appimage.sh)
+  build_windows.sh      cross-build + package the windows-x64 zip from Linux
+  test_windows_proton.sh  run that .exe under Steam's Proton and report per probe
+  check_windows_pe.sh   assert a PE imports only Windows system DLLs (the 0xc000007b gate)
   appimage/AppRun + battle-hunter-recompiled.desktop   the AppImage's rendered inputs
+toolchain/
+  windows-x64.cmake     CMake cross toolchain (rootless unpack or distro sysroot, gcc or clang)
 tools/
   bh_pipeline.py      the developer pipeline library (unsqueeze → verify → generate → build)
   drop_and_play.py   the terminal front-end over the same pipeline (regeneration)
   sync_symbols.py, make_pipeline_diagram.py   dev utilities
 psxrecomp/           submodule → the framework (pinned)
 recomp-ui/           submodule → the launcher UI (pinned)
-docs/                the plain-English PDF report + img/ (screenshots, pipeline diagram)
+docs/                the plain-English PDF report, WINDOWS.md, img/ (screenshots, pipeline diagram)
 generated/          the translated game C — COMMITTED (releases ship the compiled game)
 disc/                (NOT committed — your dump goes here)
 ```
