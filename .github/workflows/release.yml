@@ -160,17 +160,19 @@ jobs:
           # on `build` cannot see the matrix context (GitHub rejects the whole
           # workflow file for it — only github/inputs/needs/vars are allowed
           # there), so the single-platform dispatch filter rides inside the
-          # matrix rows instead.
+          # matrix rows instead. NOTE the {"include": …} wrapper: strategy.matrix
+          # must deserialize to an OBJECT — a bare array of rows makes GitHub
+          # fail the run at matrix expansion with no build jobs created.
           case "${PLATFORMS}" in
             linux-x64)
-              MATRIX='[{"os":"ubuntu-24.04","artifact":"linux-x64","shell":"bash"}]' ;;
+              MATRIX='{"include":[{"os":"ubuntu-24.04","artifact":"linux-x64","shell":"bash"}]}' ;;
             windows-x64)
               # Every step of the Windows job runs in the MSYS2 MINGW64 shell:
               # the build needs the MinGW-w64 toolchain and the /mingw64
               # prefix, absent from the runner's default Git Bash.
-              MATRIX='[{"os":"windows-2022","artifact":"windows-x64","shell":"msys2 {0}"}]' ;;
+              MATRIX='{"include":[{"os":"windows-2022","artifact":"windows-x64","shell":"msys2 {0}"}]}' ;;
             *)
-              MATRIX='[{"os":"ubuntu-24.04","artifact":"linux-x64","shell":"bash"},{"os":"windows-2022","artifact":"windows-x64","shell":"msys2 {0}"}]' ;;
+              MATRIX='{"include":[{"os":"ubuntu-24.04","artifact":"linux-x64","shell":"bash"},{"os":"windows-2022","artifact":"windows-x64","shell":"msys2 {0}"}]}' ;;
           esac
           echo "matrix=${MATRIX}" >>"$GITHUB_OUTPUT"
           echo "Using version ${VER} (tag ${TAG}), publish=${PUBLISH}, reuse_emitters=${REUSE}, platforms=${PLATFORMS}"
