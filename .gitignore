@@ -46,6 +46,10 @@ bios.cfg
 disc.cfg
 rom.cfg
 settings.toml
+# Machine-local stamp the setup wizard's toolchain installer writes
+# (tools/toolchain_pack.py). It holds a path under $HOME of whichever machine
+# ran the wizard and is regenerated on demand; it must never be committed.
+toolchain/.psxrecomp-bin
 
 # Local analysis scratch — GPU frame captures / parity dumps (the default
 # --out for tools/gpu_frame_*.py and gpu_parity.py) and asset rips pulled off
