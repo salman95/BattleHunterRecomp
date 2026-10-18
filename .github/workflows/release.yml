@@ -91,6 +91,7 @@ jobs:
       publish: ${{ steps.meta.outputs.publish }}
       reuse_emitters: ${{ steps.meta.outputs.reuse_emitters }}
       platforms: ${{ steps.meta.outputs.platforms }}
+      matrix: ${{ steps.meta.outputs.matrix }}
     steps:
       - name: Checkout (tags for auto-bump)
         if: github.event_name == 'workflow_dispatch'
@@ -155,30 +156,33 @@ jobs:
           echo "publish=${PUBLISH}" >>"$GITHUB_OUTPUT"
           echo "reuse_emitters=${REUSE}" >>"$GITHUB_OUTPUT"
           echo "platforms=${PLATFORMS}" >>"$GITHUB_OUTPUT"
+          # The build matrix is built HERE, not under `build`: a job-level `if`
+          # on `build` cannot see the matrix context (GitHub rejects the whole
+          # workflow file for it — only github/inputs/needs/vars are allowed
+          # there), so the single-platform dispatch filter rides inside the
+          # matrix rows instead.
+          case "${PLATFORMS}" in
+            linux-x64)
+              MATRIX='[{"os":"ubuntu-24.04","artifact":"linux-x64","shell":"bash"}]' ;;
+            windows-x64)
+              # Every step of the Windows job runs in the MSYS2 MINGW64 shell:
+              # the build needs the MinGW-w64 toolchain and the /mingw64
+              # prefix, absent from the runner's default Git Bash.
+              MATRIX='[{"os":"windows-2022","artifact":"windows-x64","shell":"msys2 {0}"}]' ;;
+            *)
+              MATRIX='[{"os":"ubuntu-24.04","artifact":"linux-x64","shell":"bash"},{"os":"windows-2022","artifact":"windows-x64","shell":"msys2 {0}"}]' ;;
+          esac
+          echo "matrix=${MATRIX}" >>"$GITHUB_OUTPUT"
           echo "Using version ${VER} (tag ${TAG}), publish=${PUBLISH}, reuse_emitters=${REUSE}, platforms=${PLATFORMS}"
 
   build:
     name: ${{ matrix.artifact }}
     needs: prepare
-    # A single-platform dispatch skips the other leg; the release job then
-    # publishes whatever was built.
-    if: >-
-      needs.prepare.outputs.platforms == 'all' ||
-      needs.prepare.outputs.platforms == matrix.artifact
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            artifact: linux-x64
-            shell: bash
-          - os: windows-2022
-            artifact: windows-x64
-            # Every step of the Windows job runs in the MSYS2 MINGW64 shell: the
-            # build needs the MinGW-w64 toolchain and the /mingw64 prefix, which
-            # the runner's default Git Bash does not put on PATH.
-            shell: 'msys2 {0}'
+      # fromJSON: the rows (and the single-platform filter) come from prepare.
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     defaults:
       run:
         shell: ${{ matrix.shell }}
